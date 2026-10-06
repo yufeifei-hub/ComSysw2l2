@@ -1,17 +1,31 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"net"
-	"fmt"
+	"os"
 )
 
 func read(conn net.Conn) {
-	//TODO In a continuous loop, read a message from the server and display it.
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		line := scanner.Text()
+		println(line)
+	}
+	// 服务器断开，退出
 }
 
 func write(conn net.Conn) {
-	//TODO Continually get input from the user and send messages to the server.
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// 加上换行符，server那边用scanner按行读取
+		_, err := conn.Write([]byte(line + "\n"))
+		if err != nil {
+			return
+		}
+	}
 }
 
 func main() {
@@ -19,6 +33,18 @@ func main() {
 	addrPtr := flag.String("ip", "127.0.0.1:8030", "IP:port string to connect to")
 	flag.Parse()
 	//TODO Try to connect to the server
+	// 连接服务器
+	conn, err := net.Dial("tcp", *addrPtr)
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+
 	//TODO Start asynchronously reading and displaying messages
+	// 异步启动 read 协程：接收别人消息
+	go read(conn)
+
 	//TODO Start getting and sending user messages.
+	// 主协程跑 write：自己打字发送
+	write(conn)
 }

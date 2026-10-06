@@ -3,8 +3,8 @@ package main
 import (
 	"bufio"
 	"flag"
-	"net"
 	"fmt"
+	"net"
 )
 
 type Message struct {
@@ -13,22 +13,42 @@ type Message struct {
 }
 
 func handleError(err error) {
-	// TODO: all
-	// Deal with an error event.
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
 }
 
 func acceptConns(ln net.Listener, conns chan net.Conn) {
-	// TODO: all
-	// Continuously accept a network connection from the Listener
-	// and add it to the channel for handling connections.
+	for {
+		// 等待新客户端连接
+		conn, err := ln.Accept()
+		if err != nil {
+			handleError(err)
+			continue
+		}
+		// 拿到连接，丢进 conns channel，交给 main 的 select 处理
+		conns <- conn
+	}
 }
 
 func handleClient(client net.Conn, clientid int, msgs chan Message) {
-	// TODO: all
-	// So long as this connection is alive:
-	// Read in new messages as delimited by '\n's
-	// Tidy up each message and add it to the messages channel,
-	// recording which client it came from.
+	defer client.Close()
+	scanner := bufio.NewScanner(client)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		msg := Message{
+			sender:  clientid,
+			message: line + "\n", // 加上换行符，方便客户端区分消息边界
+		}
+		msgs <- msg
+	}
+
+	// 客户端断开 / 读取出错，走到这里
+	// 注意：这里不能直接删map！map只能main协程修改
+	// 👉 后面我们需要额外发一条特殊消息通知main删除这个client
+	handleError(scanner.Err())
+
 }
 
 func main() {
@@ -38,6 +58,11 @@ func main() {
 	flag.Parse()
 
 	//TODO Create a Listener for TCP connections on the port given above.
+	ln, err := net.Listen("tcp", *portPtr)
+	handleError(err)
+	if ln == nil {
+		return
+	}
 
 	//Create a channel for connections
 	conns := make(chan net.Conn)
@@ -48,6 +73,10 @@ func main() {
 
 	//Start accepting connections
 	go acceptConns(ln, conns)
+
+	// 用来给客户端分配ID，每来一个新用户就+1
+	nextID := 1
+
 	for {
 		select {
 		case conn := <-conns:
@@ -55,9 +84,23 @@ func main() {
 			// - assign a client ID
 			// - add the client to the clients map
 			// - start to asynchronously handle messages from this client
+			clientID := nextID
+			nextID++
+			clients[clientID] = conn
+			go handleClient(conn, clientID, msgs)
+
 		case msg := <-msgs:
 			//TODO Deal with a new message
 			// Send the message to all clients that aren't the sender
+			for id, c := range clients {
+				if id != msg.sender {
+					_, err := c.Write([]byte(msg.message))
+					if err != nil {
+						handleError(err)
+					}
+				}
+			}
+
 		}
 	}
 }
